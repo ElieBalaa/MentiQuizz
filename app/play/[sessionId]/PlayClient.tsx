@@ -63,6 +63,7 @@ export default function PlayClient({ sessionId, quizTitle, initialStatus }: Prop
   const [leaderboard, setLeaderboard] = useState<Participant[]>([])
   const [myRank, setMyRank] = useState<number | null>(null)
   const [totalScore, setTotalScore] = useState(0)
+  const [countdown, setCountdown] = useState<number>(0)
   const questionStartRef = useRef<string | null>(null)
   const submittingRef = useRef(false)
 
@@ -102,6 +103,9 @@ export default function PlayClient({ sessionId, quizTitle, initialStatus }: Prop
             setAnswerResult(null)
             setHasAnswered(false)
             submittingRef.current = false
+            setCountdown(3)
+          } else if (newSession.status === 'question' && prevSession.status !== 'question') {
+            setCountdown(3)
           }
           return newSession
         })
@@ -146,8 +150,32 @@ export default function PlayClient({ sessionId, quizTitle, initialStatus }: Prop
         })
     }
 
+    // 3. Check if countdown should run (if less than 3 seconds have elapsed since started)
+    const elapsedMs = session.question_started_at
+      ? Date.now() - new Date(session.question_started_at).getTime()
+      : 0
+    const elapsedSeconds = elapsedMs / 1000
+
+    if (elapsedSeconds < 3 && session.status === 'question') {
+      const remainingCountdown = Math.ceil(3 - elapsedSeconds)
+      setCountdown(remainingCountdown)
+    } else {
+      setCountdown(0)
+    }
+
     questionStartRef.current = session.question_started_at
-  }, [session.current_question_id, session.question_started_at, participantId, sessionId, supabase])
+  }, [session.current_question_id, session.question_started_at, participantId, sessionId, supabase, session.status])
+
+  // Handle countdown ticks
+  useEffect(() => {
+    if (countdown <= 0) return
+
+    const timer = setTimeout(() => {
+      setCountdown(prev => Math.max(0, prev - 1))
+    }, 1000)
+
+    return () => clearTimeout(timer)
+  }, [countdown])
 
   // Load leaderboard when entering leaderboard or finished phase
   useEffect(() => {
@@ -189,9 +217,11 @@ export default function PlayClient({ sessionId, quizTitle, initialStatus }: Prop
     submittingRef.current = true
     setHasAnswered(true)
 
-    const timeTakenMs = session.question_started_at
+    const rawTimeTakenMs = session.question_started_at
       ? Date.now() - new Date(session.question_started_at).getTime()
       : currentQuestion.time_limit * 1000
+    // Subtract 3s (3000ms) for the countdown, min 0
+    const timeTakenMs = Math.max(0, rawTimeTakenMs - 3000)
 
     const result = await submitAnswer(
       sessionId,
@@ -256,6 +286,35 @@ export default function PlayClient({ sessionId, quizTitle, initialStatus }: Prop
 
   // QUESTION PHASE
   if (session.status === 'question' && currentQuestion) {
+    if (countdown > 0) {
+      return (
+        <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--space-6)' }}>
+          <div className="card card-glow animate-bounce-in" style={{ textAlign: 'center', maxWidth: 480, width: '100%', padding: 'var(--space-10)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-6)' }}>
+            <span className="question-number" style={{ fontSize: '1rem' }}>
+              Question {session.current_question_index + 1}
+            </span>
+            <h2 style={{ fontSize: '2.5rem', fontFamily: 'var(--font-heading)', margin: 0 }}>Get Ready!</h2>
+            <div style={{
+              fontSize: '7rem',
+              fontWeight: 900,
+              fontFamily: 'var(--font-heading)',
+              background: 'linear-gradient(135deg, var(--color-primary-light), var(--color-accent-light))',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              backgroundClip: 'text',
+              animation: 'countdown-tick 1s ease-in-out infinite',
+              lineHeight: 1,
+            }}>
+              {countdown}
+            </div>
+            <p style={{ color: 'var(--color-text-secondary)' }}>
+              Look at the screen! Choices are appearing...
+            </p>
+          </div>
+        </div>
+      )
+    }
+
     const progress = currentQuestion.time_limit > 0 ? timeLeft / currentQuestion.time_limit : 0
     const isUrgent = timeLeft <= 5
 
