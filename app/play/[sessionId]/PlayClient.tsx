@@ -126,7 +126,15 @@ export default function PlayClient({ sessionId, quizTitle, initialStatus }: Prop
       .eq('id', session.current_question_id)
       .single()
       .then(({ data }) => {
-        if (data) setCurrentQuestion(data as Question)
+        if (data) {
+          setCurrentQuestion(data as Question)
+          const elapsedMs = session.question_started_at
+            ? Date.now() - new Date(session.question_started_at).getTime()
+            : 0
+          const elapsedSeconds = Math.floor(elapsedMs / 1000)
+          const remaining = Math.max(0, data.time_limit - Math.max(0, elapsedSeconds - 3))
+          setTimeLeft(remaining)
+        }
       })
 
     // 2. Load existing answer if the user reloaded the page
@@ -197,23 +205,21 @@ export default function PlayClient({ sessionId, quizTitle, initialStatus }: Prop
       })
   }, [session.status, participantId, sessionId])
 
-  // Timer
+  // Local decrement timer
   useEffect(() => {
-    if (session.status !== 'question' || !session.question_started_at || !currentQuestion) {
-      setTimeLeft(0); return
+    if (session.status !== 'question' || countdown > 0 || timeLeft <= 0 || !currentQuestion) {
+      return
     }
-    const update = () => {
-      const elapsed = (Date.now() - new Date(session.question_started_at!).getTime()) / 1000
-      const remaining = Math.max(0, currentQuestion.time_limit - elapsed)
-      setTimeLeft(remaining)
-    }
-    update()
-    const iv = setInterval(update, 100)
-    return () => clearInterval(iv)
-  }, [session.status, session.question_started_at, currentQuestion])
+
+    const timer = setInterval(() => {
+      setTimeLeft((prev) => Math.max(0, prev - 1))
+    }, 1000)
+
+    return () => clearInterval(timer)
+  }, [session.status, countdown, timeLeft, currentQuestion])
 
   async function handleAnswer(optionId: string) {
-    if (hasAnswered || !currentQuestion || !participantId || submittingRef.current) return
+    if (hasAnswered || timeLeft <= 0 || !currentQuestion || !participantId || submittingRef.current) return
     submittingRef.current = true
     setHasAnswered(true)
 
