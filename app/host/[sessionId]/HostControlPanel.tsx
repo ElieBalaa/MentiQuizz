@@ -29,6 +29,7 @@ interface Session {
   current_question_index: number
   current_question_id: string | null
   question_started_at: string | null
+  show_final_leaderboard: boolean
 }
 
 interface Props {
@@ -403,6 +404,34 @@ export default function HostControlPanel({ initialSession, quiz, initialParticip
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: 'var(--space-2)' }}>
               <span>Start</span>
               <span>Finish</span>
+            </div>
+          </div>
+
+          {/* SETTINGS CARD */}
+          <div className="card">
+            <p style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--color-text-muted)', marginBottom: 'var(--space-3)' }}>
+              Settings
+            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+              <input
+                id="toggle-final-leaderboard"
+                type="checkbox"
+                checked={session.show_final_leaderboard}
+                onChange={async (e) => {
+                  const val = e.target.checked
+                  // Optimistic update
+                  setSession(prev => ({ ...prev, show_final_leaderboard: val }))
+                  // DB update
+                  await supabase
+                    .from('sessions')
+                    .update({ show_final_leaderboard: val })
+                    .eq('id', session.id)
+                }}
+                style={{ width: 18, height: 18, accentColor: 'var(--color-primary-light)', cursor: 'pointer' }}
+              />
+              <label htmlFor="toggle-final-leaderboard" style={{ cursor: 'pointer', fontSize: '0.85rem', textTransform: 'none', fontWeight: 500, color: 'var(--color-text-primary)' }}>
+                Show final leaderboard to players
+              </label>
             </div>
           </div>
 

@@ -22,6 +22,7 @@ interface Session {
   current_question_id: string | null
   current_question_index: number
   question_started_at: string | null
+  show_final_leaderboard: boolean
 }
 
 interface Participant {
@@ -55,6 +56,7 @@ export default function PlayClient({ sessionId, quizTitle, initialStatus }: Prop
     current_question_id: null,
     current_question_index: -1,
     question_started_at: null,
+    show_final_leaderboard: true,
   })
   const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null)
   const [answerResult, setAnswerResult] = useState<AnswerResult | null>(null)
@@ -79,11 +81,11 @@ export default function PlayClient({ sessionId, quizTitle, initialStatus }: Prop
   useEffect(() => {
     supabase
       .from('sessions')
-      .select('status, current_question_id, current_question_index, question_started_at')
+      .select('status, current_question_id, current_question_index, question_started_at, show_final_leaderboard')
       .eq('id', sessionId)
       .single()
       .then(({ data }) => { if (data) setSession(data as Session) })
-  }, [sessionId])
+  }, [sessionId, supabase])
 
   // Real-time session subscription
   useEffect(() => {
@@ -542,21 +544,23 @@ export default function PlayClient({ sessionId, quizTitle, initialStatus }: Prop
             </p>
             <p style={{ color: 'var(--color-text-muted)', marginTop: 8 }}>final score</p>
           </div>
-          {myRank && (
+          {session.show_final_leaderboard && myRank && (
             <p style={{ fontSize: '1.1rem' }}>
               Final rank: <strong style={{ color: 'var(--color-primary-light)', fontSize: '1.3rem' }}>#{myRank}</strong>
               {myRank === 1 ? ' 🥇' : myRank === 2 ? ' 🥈' : myRank === 3 ? ' 🥉' : ''}
             </p>
           )}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', width: '100%', marginTop: 'var(--space-4)' }}>
-            {leaderboard.slice(0, 5).map((p, i) => (
-              <div key={p.id} className="leaderboard-item" style={{ animationDelay: `${i * 0.07}s`, border: p.id === participantId ? '1px solid var(--color-primary)' : undefined }}>
-                <div className={`leaderboard-rank ${i < 3 ? `rank-${i + 1}` : ''}`}>{i + 1}</div>
-                <span className="leaderboard-name">{p.display_name}</span>
-                <span className="leaderboard-score">{p.score.toLocaleString()}</span>
-              </div>
-            ))}
-          </div>
+          {session.show_final_leaderboard && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', width: '100%', marginTop: 'var(--space-4)' }}>
+              {leaderboard.slice(0, 5).map((p, i) => (
+                <div key={p.id} className="leaderboard-item" style={{ animationDelay: `${i * 0.07}s`, border: p.id === participantId ? '1px solid var(--color-primary)' : undefined }}>
+                  <div className={`leaderboard-rank ${i < 3 ? `rank-${i + 1}` : ''}`}>{i + 1}</div>
+                  <span className="leaderboard-name">{p.display_name}</span>
+                  <span className="leaderboard-score">{p.score.toLocaleString()}</span>
+                </div>
+              ))}
+            </div>
+          )}
           <Link href="/join" className="btn btn-primary" style={{ marginTop: 'var(--space-4)' }}>Play Another Quiz →</Link>
         </div>
       </div>

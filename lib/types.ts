@@ -45,6 +45,7 @@ export interface Session {
   current_question_index: number
   current_question_id: string | null
   question_started_at: string | null
+  show_final_leaderboard: boolean
   created_at: string
   updated_at: string
   quiz?: Quiz
