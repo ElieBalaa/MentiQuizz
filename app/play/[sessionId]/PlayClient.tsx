@@ -290,6 +290,62 @@ export default function PlayClient({ sessionId, quizTitle, initialStatus }: Prop
     )
   }
 
+  // RESULTS PHASE (answer revealed) OR when time runs out on the client
+  const isTimeUp = session.status === 'results' || (session.status === 'question' && timeLeft <= 0 && countdown === 0)
+
+  if (isTimeUp && currentQuestion) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--space-6)' }}>
+        <div style={{ width: '100%', maxWidth: 600, display: 'flex', flexDirection: 'column', gap: 'var(--space-5)', alignItems: 'center' }}>
+          <div className="card animate-slide-down" style={{ width: '100%', textAlign: 'center', padding: 'var(--space-6)' }}>
+            <p className="question-text" style={{ fontSize: '1.1rem' }}>{currentQuestion.question_text}</p>
+          </div>
+
+          <div className="answer-grid" style={{ width: '100%' }}>
+            {currentQuestion.options.map((opt, idx) => {
+              const isCorrect = opt.id === currentQuestion.correct_answer
+              const wasMyAnswer = answerResult?.chosenOption === opt.id
+              return (
+                <div
+                  key={opt.id}
+                  className={`answer-btn ${ANSWER_BTN_CLASSES[idx]} ${isCorrect ? 'correct' : (!wasMyAnswer ? 'incorrect' : '')}`}
+                  style={{ cursor: 'default', opacity: isCorrect ? 1 : 0.5 }}
+                >
+                  <span className="answer-label">{OPTION_LABELS[idx]}</span>
+                  <span>{opt.text}</span>
+                  {isCorrect && <span style={{ marginLeft: 'auto' }}>✓</span>}
+                </div>
+              )
+            })}
+          </div>
+
+          {answerResult ? (
+            <div className="card animate-bounce-in" style={{ textAlign: 'center', width: '100%', padding: 'var(--space-6)' }}>
+              <div style={{ fontSize: '2rem', marginBottom: 'var(--space-2)' }}>
+                {answerResult.isCorrect ? '🎉' : '😔'}
+              </div>
+              <h3 style={{ color: answerResult.isCorrect ? 'var(--color-success-light)' : 'var(--color-danger-light)', marginBottom: 'var(--space-1)' }}>
+                {answerResult.isCorrect ? 'Correct!' : 'Wrong answer'}
+              </h3>
+              {answerResult.isCorrect && (
+                <p style={{ fontFamily: 'var(--font-heading)', fontSize: '2rem', fontWeight: 900, color: '#fbbf24' }}>
+                  +{answerResult.pointsEarned.toLocaleString()}
+                </p>
+              )}
+              <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)', marginTop: 'var(--space-2)' }}>
+                Total score: <strong style={{ color: 'var(--color-primary-light)' }}>{totalScore.toLocaleString()}</strong>
+              </p>
+            </div>
+          ) : (
+            <div className="card animate-pop" style={{ textAlign: 'center', padding: 'var(--space-5)' }}>
+              <p style={{ color: 'var(--color-warning)', fontWeight: 600 }}>⏰ Time&apos;s up — you didn&apos;t answer in time</p>
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   // QUESTION PHASE
   if (session.status === 'question' && currentQuestion) {
     if (countdown > 0) {
@@ -423,61 +479,7 @@ export default function PlayClient({ sessionId, quizTitle, initialStatus }: Prop
     )
   }
 
-  // RESULTS PHASE (answer revealed) OR when time runs out on the client
-  const isTimeUp = session.status === 'results' || (session.status === 'question' && timeLeft <= 0 && countdown === 0)
 
-  if (isTimeUp && currentQuestion) {
-    return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--space-6)' }}>
-        <div style={{ width: '100%', maxWidth: 600, display: 'flex', flexDirection: 'column', gap: 'var(--space-5)', alignItems: 'center' }}>
-          <div className="card animate-slide-down" style={{ width: '100%', textAlign: 'center', padding: 'var(--space-6)' }}>
-            <p className="question-text" style={{ fontSize: '1.1rem' }}>{currentQuestion.question_text}</p>
-          </div>
-
-          <div className="answer-grid" style={{ width: '100%' }}>
-            {currentQuestion.options.map((opt, idx) => {
-              const isCorrect = opt.id === currentQuestion.correct_answer
-              const wasMyAnswer = answerResult?.chosenOption === opt.id
-              return (
-                <div
-                  key={opt.id}
-                  className={`answer-btn ${ANSWER_BTN_CLASSES[idx]} ${isCorrect ? 'correct' : (!wasMyAnswer ? 'incorrect' : '')}`}
-                  style={{ cursor: 'default', opacity: isCorrect ? 1 : 0.5 }}
-                >
-                  <span className="answer-label">{OPTION_LABELS[idx]}</span>
-                  <span>{opt.text}</span>
-                  {isCorrect && <span style={{ marginLeft: 'auto' }}>✓</span>}
-                </div>
-              )
-            })}
-          </div>
-
-          {answerResult ? (
-            <div className="card animate-bounce-in" style={{ textAlign: 'center', width: '100%', padding: 'var(--space-6)' }}>
-              <div style={{ fontSize: '2rem', marginBottom: 'var(--space-2)' }}>
-                {answerResult.isCorrect ? '🎉' : '😔'}
-              </div>
-              <h3 style={{ color: answerResult.isCorrect ? 'var(--color-success-light)' : 'var(--color-danger-light)', marginBottom: 'var(--space-1)' }}>
-                {answerResult.isCorrect ? 'Correct!' : 'Wrong answer'}
-              </h3>
-              {answerResult.isCorrect && (
-                <p style={{ fontFamily: 'var(--font-heading)', fontSize: '2rem', fontWeight: 900, color: '#fbbf24' }}>
-                  +{answerResult.pointsEarned.toLocaleString()}
-                </p>
-              )}
-              <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)', marginTop: 'var(--space-2)' }}>
-                Total score: <strong style={{ color: 'var(--color-primary-light)' }}>{totalScore.toLocaleString()}</strong>
-              </p>
-            </div>
-          ) : (
-            <div className="card animate-pop" style={{ textAlign: 'center', padding: 'var(--space-5)' }}>
-              <p style={{ color: 'var(--color-warning)', fontWeight: 600 }}>⏰ Time&apos;s up — you didn&apos;t answer in time</p>
-            </div>
-          )}
-        </div>
-      </div>
-    )
-  }
 
   // LEADERBOARD PHASE
   if (session.status === 'leaderboard') {
