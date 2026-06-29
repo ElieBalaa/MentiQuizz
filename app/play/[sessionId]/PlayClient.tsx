@@ -294,17 +294,20 @@ export default function PlayClient({ sessionId, quizTitle, initialStatus }: Prop
               Question {session.current_question_index + 1}
             </span>
             <h2 style={{ fontSize: '2.5rem', fontFamily: 'var(--font-heading)', margin: 0 }}>Get Ready!</h2>
-            <div style={{
-              fontSize: '7rem',
-              fontWeight: 900,
-              fontFamily: 'var(--font-heading)',
-              background: 'linear-gradient(135deg, var(--color-primary-light), var(--color-accent-light))',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              backgroundClip: 'text',
-              animation: 'countdown-tick 1s ease-in-out infinite',
-              lineHeight: 1,
-            }}>
+            <div
+              key={countdown}
+              style={{
+                fontSize: '7rem',
+                fontWeight: 900,
+                fontFamily: 'var(--font-heading)',
+                background: 'linear-gradient(135deg, var(--color-primary-light), var(--color-accent-light))',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                backgroundClip: 'text',
+                animation: 'countdown-tick 1s cubic-bezier(0.34, 1.56, 0.64, 1) both',
+                lineHeight: 1,
+              }}
+            >
               {countdown}
             </div>
             <p style={{ color: 'var(--color-text-secondary)' }}>
@@ -414,8 +417,10 @@ export default function PlayClient({ sessionId, quizTitle, initialStatus }: Prop
     )
   }
 
-  // RESULTS PHASE (answer revealed)
-  if (session.status === 'results' && currentQuestion) {
+  // RESULTS PHASE (answer revealed) OR when time runs out on the client
+  const isTimeUp = session.status === 'results' || (session.status === 'question' && timeLeft <= 0 && countdown === 0)
+
+  if (isTimeUp && currentQuestion) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--space-6)' }}>
         <div style={{ width: '100%', maxWidth: 600, display: 'flex', flexDirection: 'column', gap: 'var(--space-5)', alignItems: 'center' }}>
