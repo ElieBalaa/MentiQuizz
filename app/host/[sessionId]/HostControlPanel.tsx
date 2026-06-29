@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useTransition } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { advanceSession, startSession, endSession } from '@/app/actions/session'
+import { advanceSession, startSession, endSession, skipLeaderboardToNextQuestion } from '@/app/actions/session'
 import type { Participant, Answer } from '@/lib/types'
 import Link from 'next/link'
 
@@ -138,6 +138,12 @@ export default function HostControlPanel({ initialSession, quiz, initialParticip
 
   function handleEnd() {
     startTransition(async () => { await endSession(session.id) })
+  }
+
+  function handleSkipLeaderboard() {
+    startTransition(async () => {
+      await skipLeaderboardToNextQuestion(session.id)
+    })
   }
 
   // Answer distribution
@@ -336,16 +342,30 @@ export default function HostControlPanel({ initialSession, quiz, initialParticip
             </div>
           )}
 
-          {/* ADVANCE BUTTON */}
-          <button
-            id="host-advance-btn"
-            className="btn btn-primary btn-lg"
-            style={{ width: '100%', justifyContent: 'center' }}
-            onClick={handleAdvance}
-            disabled={isPending}
-          >
-            {isPending ? <><span className="spinner" /> Please wait...</> : getButtonLabel()}
-          </button>
+          {/* ADVANCE BUTTONS */}
+          <div className="flex gap-3" style={{ width: '100%' }}>
+            <button
+              id="host-advance-btn"
+              className="btn btn-primary btn-lg"
+              style={{ flex: session.status === 'results' ? 2 : 1, justifyContent: 'center' }}
+              onClick={handleAdvance}
+              disabled={isPending}
+            >
+              {isPending ? <><span className="spinner" /> Please wait...</> : getButtonLabel()}
+            </button>
+
+            {session.status === 'results' && (
+              <button
+                id="host-skip-leaderboard-btn"
+                className="btn btn-ghost btn-lg"
+                style={{ flex: 1, justifyContent: 'center', borderColor: 'var(--color-primary-light)', color: 'var(--color-primary-light)' }}
+                onClick={handleSkipLeaderboard}
+                disabled={isPending}
+              >
+                ⏭ Direct Next
+              </button>
+            )}
+          </div>
         </div>
 
         {/* SIDEBAR */}
