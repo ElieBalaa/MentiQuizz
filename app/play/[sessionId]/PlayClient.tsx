@@ -95,23 +95,27 @@ export default function PlayClient({ sessionId, quizTitle, initialStatus }: Prop
         filter: `id=eq.${sessionId}`,
       }, (payload) => {
         const newSession = payload.new as Session
-        setSession(newSession)
-
-        // Reset answer state when new question comes in
-        if (payload.new.current_question_id !== payload.old?.current_question_id) {
-          setAnswerResult(null)
-          setHasAnswered(false)
-          submittingRef.current = false
-        }
+        
+        // Reset answer state ONLY when the actual question ID changes, compared against previous React state
+        setSession((prevSession) => {
+          if (newSession.current_question_id !== prevSession.current_question_id) {
+            setAnswerResult(null)
+            setHasAnswered(false)
+            submittingRef.current = false
+          }
+          return newSession
+        })
       })
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }
-  }, [sessionId])
+  }, [sessionId, supabase])
 
   // Load question when current_question_id changes
   useEffect(() => {
     if (!session.current_question_id) { setCurrentQuestion(null); return }
+    
+    // 1. Fetch question details
     supabase
       .from('questions')
       .select('*')
@@ -120,8 +124,30 @@ export default function PlayClient({ sessionId, quizTitle, initialStatus }: Prop
       .then(({ data }) => {
         if (data) setCurrentQuestion(data as Question)
       })
+
+    // 2. Load existing answer if the user reloaded the page
+    if (participantId) {
+      supabase
+        .from('answers')
+        .select('chosen_option, is_correct, points_earned')
+        .eq('session_id', sessionId)
+        .eq('question_id', session.current_question_id)
+        .eq('participant_id', participantId)
+        .maybeSingle()
+        .then(({ data }) => {
+          if (data) {
+            setAnswerResult({
+              isCorrect: data.is_correct,
+              pointsEarned: data.points_earned,
+              chosenOption: data.chosen_option
+            })
+            setHasAnswered(true)
+          }
+        })
+    }
+
     questionStartRef.current = session.question_started_at
-  }, [session.current_question_id])
+  }, [session.current_question_id, session.question_started_at, participantId, sessionId, supabase])
 
   // Load leaderboard when entering leaderboard or finished phase
   useEffect(() => {
