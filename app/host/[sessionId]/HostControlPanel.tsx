@@ -430,7 +430,7 @@ export default function HostControlPanel({ initialSession, quiz, initialParticip
                 style={{ width: 18, height: 18, accentColor: 'var(--color-primary-light)', cursor: 'pointer' }}
               />
               <label htmlFor="toggle-final-leaderboard" style={{ cursor: 'pointer', fontSize: '0.85rem', textTransform: 'none', fontWeight: 500, color: 'var(--color-text-primary)' }}>
-                Show final leaderboard to players
+                Show leaderboard on player screens
               </label>
             </div>
           </div>

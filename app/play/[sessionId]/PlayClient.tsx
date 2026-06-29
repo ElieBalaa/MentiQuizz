@@ -497,28 +497,38 @@ export default function PlayClient({ sessionId, quizTitle, initialStatus }: Prop
               </p>
             )}
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-            {leaderboard.slice(0, 10).map((p, i) => (
-              <div
-                key={p.id}
-                className="leaderboard-item"
-                style={{
-                  animationDelay: `${i * 0.08}s`,
-                  border: p.id === participantId ? '1px solid var(--color-primary)' : undefined,
-                  background: p.id === participantId ? 'rgba(124,58,237,0.1)' : undefined,
-                }}
-              >
-                <div className={`leaderboard-rank ${i < 3 ? `rank-${i + 1}` : ''}`}>{i + 1}</div>
-                <div className="avatar" style={{ background: `hsl(${(p.display_name.charCodeAt(0) * 37) % 360}, 70%, 50%)`, color: 'white', fontSize: '0.75rem' }}>
-                  {p.display_name[0].toUpperCase()}
+          {session.show_final_leaderboard ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+              {leaderboard.slice(0, 10).map((p, i) => (
+                <div
+                  key={p.id}
+                  className="leaderboard-item"
+                  style={{
+                    animationDelay: `${i * 0.08}s`,
+                    border: p.id === participantId ? '1px solid var(--color-primary)' : undefined,
+                    background: p.id === participantId ? 'rgba(124,58,237,0.1)' : undefined,
+                  }}
+                >
+                  <div className={`leaderboard-rank ${i < 3 ? `rank-${i + 1}` : ''}`}>{i + 1}</div>
+                  <div className="avatar" style={{ background: `hsl(${(p.display_name.charCodeAt(0) * 37) % 360}, 70%, 50%)`, color: 'white', fontSize: '0.75rem' }}>
+                    {p.display_name[0].toUpperCase()}
+                  </div>
+                  <span className="leaderboard-name">
+                    {p.display_name} {p.id === participantId ? '(you)' : ''}
+                  </span>
+                  <span className="leaderboard-score">{p.score.toLocaleString()}</span>
                 </div>
-                <span className="leaderboard-name">
-                  {p.display_name} {p.id === participantId ? '(you)' : ''}
-                </span>
-                <span className="leaderboard-score">{p.score.toLocaleString()}</span>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="card card-glow animate-bounce-in" style={{ textAlign: 'center', padding: 'var(--space-8)' }}>
+              <div style={{ fontSize: '3rem', marginBottom: 'var(--space-4)' }}>📺</div>
+              <h3>Look at the presenter screen!</h3>
+              <p style={{ color: 'var(--color-text-secondary)', marginTop: 'var(--space-2)' }}>
+                Standings are being shown by the host.
+              </p>
+            </div>
+          )}
           <p style={{ textAlign: 'center', marginTop: 'var(--space-6)', color: 'var(--color-text-muted)', fontSize: '0.875rem' }}>
             <span className="spinner" style={{ display: 'inline-block', marginRight: 8, verticalAlign: 'middle' }} />
             Next question coming up...
