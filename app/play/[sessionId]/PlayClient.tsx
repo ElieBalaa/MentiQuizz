@@ -270,55 +270,58 @@ export default function PlayClient({ sessionId, quizTitle, initialStatus }: Prop
             <p className="question-text">{currentQuestion.question_text}</p>
           </div>
 
-          {/* ANSWER BUTTONS */}
-          <div className="answer-grid" style={{ width: '100%', maxWidth: 800 }}>
-            {currentQuestion.options.map((opt, idx) => {
-              const isSelected = answerResult?.chosenOption === opt.id
-              const showCorrect = answerResult && opt.id === currentQuestion.correct_answer
-              const showIncorrect = answerResult && isSelected && !answerResult.isCorrect
-
-              return (
+          {/* ANSWER BUTTONS OR FEEDBACK */}
+          {!hasAnswered ? (
+            <div className="answer-grid" style={{ width: '100%', maxWidth: 800 }}>
+              {currentQuestion.options.map((opt, idx) => (
                 <button
                   key={opt.id}
                   id={`answer-btn-${opt.id}`}
-                  className={`answer-btn ${ANSWER_BTN_CLASSES[idx]} ${isSelected ? 'selected' : ''} ${showCorrect ? 'correct' : ''} ${showIncorrect ? 'incorrect' : ''}`}
+                  className={`answer-btn ${ANSWER_BTN_CLASSES[idx]}`}
                   onClick={() => handleAnswer(opt.id)}
-                  disabled={hasAnswered}
                   style={{ animationDelay: `${idx * 0.1}s` }}
                 >
                   <span className="answer-label">{OPTION_LABELS[idx]}</span>
                   <span>{opt.text}</span>
                 </button>
-              )
-            })}
-          </div>
-
-          {/* ANSWER FEEDBACK */}
-          {answerResult && (
-            <div className="card animate-bounce-in" style={{ textAlign: 'center', maxWidth: 400, width: '100%', padding: 'var(--space-6)' }}>
-              {answerResult.isCorrect ? (
-                <>
-                  <div style={{ fontSize: '2.5rem', marginBottom: 'var(--space-2)' }}>🎉</div>
-                  <h3 style={{ color: 'var(--color-success-light)', marginBottom: 'var(--space-2)' }}>Correct!</h3>
-                  <p className="score-burst-points" style={{ fontSize: '2.5rem' }}>+{answerResult.pointsEarned.toLocaleString()}</p>
-                  <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)', marginTop: 'var(--space-2)' }}>points earned</p>
-                </>
-              ) : (
-                <>
-                  <div style={{ fontSize: '2.5rem', marginBottom: 'var(--space-2)' }}>😔</div>
-                  <h3 style={{ color: 'var(--color-danger-light)', marginBottom: 'var(--space-2)' }}>Not quite!</h3>
-                  <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)' }}>No points this time</p>
-                </>
-              )}
+              ))}
             </div>
-          )}
-
-          {hasAnswered && !answerResult && (
-            <div className="card animate-pop" style={{ textAlign: 'center', padding: 'var(--space-5)' }}>
-              <div className="flex items-center justify-center gap-2">
-                <span className="spinner" />
-                <span style={{ color: 'var(--color-primary-light)', fontWeight: 600 }}>Answer locked in!</span>
-              </div>
+          ) : (
+            <div className="card card-glow animate-bounce-in" style={{ textAlign: 'center', maxWidth: 500, width: '100%', padding: 'var(--space-10)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-6)' }}>
+              {answerResult ? (
+                answerResult.isCorrect ? (
+                  <>
+                    <div style={{ fontSize: '4rem', animation: 'bounce-in 0.6s ease' }}>🎉</div>
+                    <h2 style={{ color: 'var(--color-success-light)', fontFamily: 'var(--font-heading)' }}>Correct!</h2>
+                    <div>
+                      <p className="score-burst-points" style={{ fontSize: '3.5rem' }}>+{answerResult.pointsEarned.toLocaleString()}</p>
+                      <p style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)', marginTop: 4 }}>points earned for speed</p>
+                    </div>
+                    <div style={{ width: '100%', height: 1, background: 'var(--color-border)' }} />
+                    <p style={{ fontSize: '1.1rem', fontWeight: 600 }}>
+                      Total Score: <strong style={{ color: 'var(--color-primary-light)' }}>{totalScore.toLocaleString()}</strong>
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ fontSize: '4rem' }}>😔</div>
+                    <h2 style={{ color: 'var(--color-danger-light)', fontFamily: 'var(--font-heading)' }}>Incorrect</h2>
+                    <p style={{ fontSize: '1.1rem', color: 'var(--color-text-secondary)' }}>
+                      No points this round. Keep going!
+                    </p>
+                    <div style={{ width: '100%', height: 1, background: 'var(--color-border)' }} />
+                    <p style={{ fontSize: '1.1rem', fontWeight: 600 }}>
+                      Total Score: <strong style={{ color: 'var(--color-primary-light)' }}>{totalScore.toLocaleString()}</strong>
+                    </p>
+                  </>
+                )
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-4)', padding: 'var(--space-6)' }}>
+                  <span className="spinner" style={{ width: 48, height: 48, borderWidth: 4 }} />
+                  <h3 style={{ color: 'var(--color-primary-light)', fontFamily: 'var(--font-heading)' }}>Answer Locked In!</h3>
+                  <p style={{ color: 'var(--color-text-secondary)' }}>Waiting for results...</p>
+                </div>
+              )}
             </div>
           )}
         </div>
