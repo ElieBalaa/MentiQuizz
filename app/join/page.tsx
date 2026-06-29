@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { joinSession } from '@/app/actions/participant'
 import Link from 'next/link'
@@ -11,6 +11,16 @@ export default function JoinPage() {
   const [error, setError] = useState('')
   const [isPending, startTransition] = useTransition()
   const router = useRouter()
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      const code = params.get('code')
+      if (code && /^\d{6}$/.test(code)) {
+        setRoomCode(code)
+      }
+    }
+  }, [])
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()

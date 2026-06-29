@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useTransition } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { advanceSession, startSession, endSession, skipLeaderboardToNextQuestion } from '@/app/actions/session'
+import { QRCodeSVG } from 'qrcode.react'
 import type { Participant, Answer } from '@/lib/types'
 import Link from 'next/link'
 
@@ -208,27 +209,60 @@ export default function HostControlPanel({ initialSession, quiz, initialParticip
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-5)' }}>
 
           {/* WAITING ROOM */}
-          {session.status === 'waiting' && (
-            <div className="card card-glow animate-fade-in" style={{ textAlign: 'center', padding: 'var(--space-10)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-6)' }}>
-              <p style={{ textTransform: 'uppercase', letterSpacing: '0.15em', fontSize: '0.85rem', fontWeight: 700, color: 'var(--color-text-secondary)' }}>
-                Join at quizlive.app • Room Code
-              </p>
-              <div className="room-code-display animate-pulse-glow">{session.room_code}</div>
-              <p style={{ color: 'var(--color-text-secondary)' }}>
-                {participants.length === 0 ? 'Waiting for players to join...' : `${participants.length} player${participants.length !== 1 ? 's' : ''} ready!`}
-              </p>
-              <div className="waiting-room-grid" style={{ maxWidth: 500 }}>
-                {participants.map((p, i) => (
-                  <div key={p.id} className="participant-chip" style={{ animationDelay: `${i * 0.05}s` }}>
-                    <div className="avatar" style={{ background: `hsl(${(p.display_name.charCodeAt(0) * 37) % 360}, 70%, 50%)`, color: 'white' }}>
-                      {p.display_name[0].toUpperCase()}
+          {session.status === 'waiting' && (() => {
+            const joinUrl = typeof window !== 'undefined'
+              ? `${window.location.origin}/join?code=${session.room_code}`
+              : ''
+            return (
+              <div className="card card-glow animate-fade-in" style={{ textAlign: 'center', padding: 'var(--space-10)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-8)' }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: 'var(--space-10)', width: '100%' }}>
+                  {/* Room code display */}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-3)' }}>
+                    <p style={{ textTransform: 'uppercase', letterSpacing: '0.15em', fontSize: '0.85rem', fontWeight: 700, color: 'var(--color-text-secondary)', margin: 0 }}>
+                      Join Room Code
+                    </p>
+                    <div className="room-code-display animate-pulse-glow" style={{ fontSize: '3.8rem', lineHeight: 1.1 }}>
+                      {session.room_code}
                     </div>
-                    {p.display_name}
                   </div>
-                ))}
+
+                  {/* QR Code display */}
+                  {joinUrl && (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-3)' }}>
+                      <div style={{ padding: 'var(--space-3)', background: 'white', borderRadius: 'var(--radius-lg)', boxShadow: '0 8px 30px rgba(0,0,0,0.4)', display: 'inline-block' }} className="animate-pop">
+                        <QRCodeSVG
+                          value={joinUrl}
+                          size={130}
+                          bgColor={"#ffffff"}
+                          fgColor={"#0f0f1b"}
+                          level={"L"}
+                          includeMargin={false}
+                        />
+                      </div>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', fontWeight: 600 }}>
+                        Scan to Join Instantly 📸
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <p style={{ color: 'var(--color-text-secondary)', margin: 0 }}>
+                  {participants.length === 0 ? 'Waiting for players to join...' : `${participants.length} player${participants.length !== 1 ? 's' : ''} ready!`}
+                </p>
+
+                <div className="waiting-room-grid" style={{ maxWidth: 500, marginTop: 'var(--space-4)' }}>
+                  {participants.map((p, i) => (
+                    <div key={p.id} className="participant-chip" style={{ animationDelay: `${i * 0.05}s` }}>
+                      <div className="avatar" style={{ background: `hsl(${(p.display_name.charCodeAt(0) * 37) % 360}, 70%, 50%)`, color: 'white' }}>
+                        {p.display_name[0].toUpperCase()}
+                      </div>
+                      {p.display_name}
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            )
+          })()}
 
           {/* QUESTION VIEW */}
           {(session.status === 'question' || session.status === 'results') && currentQuestion && (
