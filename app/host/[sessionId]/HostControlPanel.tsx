@@ -50,6 +50,7 @@ export default function HostControlPanel({ initialSession, quiz, initialParticip
   const [answers, setAnswers] = useState<Answer[]>([])
   const [timeLeft, setTimeLeft] = useState<number>(0)
   const [isPending, startTransition] = useTransition()
+  const [isExporting, setIsExporting] = useState(false)
 
   const currentQuestion = session.current_question_id
     ? quiz.questions.find(q => q.id === session.current_question_id) ?? null
@@ -169,37 +170,153 @@ export default function HostControlPanel({ initialSession, quiz, initialParticip
     return '▶ Next'
   }
 
-  function downloadResultsExcel() {
-    const rows = sortedParticipants.map((p, i) => ({
-      Rank: i + 1,
-      Name: p.display_name,
-      Score: p.score,
-      'Questions Answered': p.answers_count,
-      'Correct Answers': p.correct_count,
-      'Accuracy (%)': p.answers_count > 0
-        ? Math.round((p.correct_count / p.answers_count) * 100)
-        : 0,
-    }))
+  async function downloadResultsExcel() {
+    setIsExporting(true)
+    try {
+      // Fetch ALL answers for this session
+      const { data: allAnswers } = await supabase
+        .from('answers')
+        .select('*')
+        .eq('session_id', session.id)
 
-    const worksheet = XLSX.utils.json_to_sheet(rows)
+      const ans: Answer[] = allAnswers ?? []
+      const workbook = XLSX.utils.book_new()
 
-    // Auto column widths
-    const colWidths = [
-      { wch: 6 },  // Rank
-      { wch: 24 }, // Name
-      { wch: 10 }, // Score
-      { wch: 22 }, // Questions Answered
-      { wch: 18 }, // Correct Answers
-      { wch: 15 }, // Accuracy
-    ]
-    worksheet['!cols'] = colWidths
+      // ── SHEET 1: Leaderboard ──────────────────────────────────────────
+      const leaderboardRows = sortedParticipants.map((p, i) => {
+        const pAnswers = ans.filter(a => a.participant_id === p.id)
+        const avgMs = pAnswers.length > 0
+          ? Math.round(pAnswers.reduce((s, a) => s + a.time_taken_ms, 0) / pAnswers.length)
+          : 0
+        return {
+          'Rank': i + 1,
+          'Name': p.display_name,
+          'Score': p.score,
+          'Questions Answered': p.answers_count,
+          'Correct Answers': p.correct_count,
+          'Wrong Answers': p.answers_count - p.correct_count,
+          'Accuracy (%)': p.answers_count > 0
+            ? Math.round((p.correct_count / p.answers_count) * 100)
+            : 0,
+          'Avg Response Time (ms)': avgMs,
+        }
+      })
+      const wsLeaderboard = XLSX.utils.json_to_sheet(leaderboardRows)
+      wsLeaderboard['!cols'] = [
+        { wch: 6 }, { wch: 28 }, { wch: 10 }, { wch: 22 },
+        { wch: 18 }, { wch: 16 }, { wch: 15 }, { wch: 24 },
+      ]
+      XLSX.utils.book_append_sheet(workbook, wsLeaderboard, 'Leaderboard')
 
-    const workbook = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Leaderboard')
+      // ── SHEET 2: Question Analysis ────────────────────────────────────
+      const questionRows = quiz.questions.map((q, qi) => {
+        const qAnswers = ans.filter(a => a.question_id === q.id)
+        const correctCount = qAnswers.filter(a => a.is_correct).length
+        const totalCount = qAnswers.length
+        const correctOpt = q.options.find(o => o.id === q.correct_answer)
 
-    const safeTitle = quiz.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()
-    const date = new Date().toISOString().slice(0, 10)
-    XLSX.writeFile(workbook, `quiz-results-${safeTitle}-${date}.xlsx`)
+        // Count each option chosen
+        const optionCounts = q.options.map(o => ({
+          id: o.id,
+          text: o.text,
+          count: qAnswers.filter(a => a.chosen_option === o.id).length,
+        }))
+        // Most chosen wrong option
+        const wrongCounts = optionCounts.filter(o => o.id !== q.correct_answer)
+        const mostMissed = wrongCounts.reduce(
+          (best, o) => (o.count > best.count ? o : best),
+          { id: '', text: 'N/A', count: 0 }
+        )
+        // Option breakdown string e.g. "A:3  B:8  C✓:12  D:1"
+        const breakdown = optionCounts.map(o => {
+          const label = q.options.indexOf(o as typeof q.options[0])
+          const letter = ['A','B','C','D'][label] ?? '?'
+          const isCorrect = o.id === q.correct_answer
+          return `${letter}${isCorrect ? '✓' : ''}:${o.count}`
+        }).join('   ')
+
+        return {
+          '#': qi + 1,
+          'Question': q.question_text,
+          'Correct Answer': correctOpt?.text ?? '',
+          'Total Responses': totalCount,
+          'Correct': correctCount,
+          'Wrong': totalCount - correctCount,
+          'Difficulty (%)': totalCount > 0
+            ? Math.round(((totalCount - correctCount) / totalCount) * 100)
+            : 0,
+          'Most Missed Option': mostMissed.count > 0 ? `${mostMissed.text} (${mostMissed.count}×)` : 'N/A',
+          'Option Breakdown': breakdown,
+        }
+      })
+      const wsQuestions = XLSX.utils.json_to_sheet(questionRows)
+      wsQuestions['!cols'] = [
+        { wch: 4 }, { wch: 50 }, { wch: 30 }, { wch: 18 },
+        { wch: 10 }, { wch: 10 }, { wch: 16 }, { wch: 36 }, { wch: 30 },
+      ]
+      XLSX.utils.book_append_sheet(workbook, wsQuestions, 'Question Analysis')
+
+      // ── SHEET 3: Answer Matrix (student × question) ───────────────────
+      // Header row: Name | Score | Accuracy | Q1 | Q2 | ...
+      const matrixHeader = [
+        'Name', 'Score', 'Accuracy (%)',
+        ...quiz.questions.map((q, i) => `Q${i + 1}`),
+      ]
+      const matrixData: (string | number)[][] = [matrixHeader]
+
+      for (const p of sortedParticipants) {
+        const pAnswers = ans.filter(a => a.participant_id === p.id)
+        const acc = p.answers_count > 0
+          ? Math.round((p.correct_count / p.answers_count) * 100)
+          : 0
+        const row: (string | number)[] = [p.display_name, p.score, acc]
+
+        for (const q of quiz.questions) {
+          const a = pAnswers.find(a => a.question_id === q.id)
+          if (!a) {
+            row.push('—')
+          } else {
+            const optIdx = q.options.findIndex(o => o.id === a.chosen_option)
+            const letter = ['A','B','C','D'][optIdx] ?? '?'
+            const mark = a.is_correct ? '✓' : '✗'
+            const secs = (a.time_taken_ms / 1000).toFixed(1)
+            row.push(`${mark} ${letter} (${secs}s)`)
+          }
+        }
+        matrixData.push(row)
+      }
+
+      const wsMatrix = XLSX.utils.aoa_to_sheet(matrixData)
+
+      // Color cells: green for correct (✓), red for wrong (✗)
+      const matrixCols = matrixHeader.length
+      const matrixRowCount = matrixData.length
+      for (let r = 1; r < matrixRowCount; r++) {
+        for (let c = 3; c < matrixCols; c++) {
+          const cellRef = XLSX.utils.encode_cell({ r, c })
+          const cell = wsMatrix[cellRef]
+          if (!cell) continue
+          const val = String(cell.v)
+          if (val.startsWith('✓')) {
+            cell.s = { fill: { fgColor: { rgb: '1A3D2B' } }, font: { color: { rgb: '86EFAC' }, bold: true } }
+          } else if (val.startsWith('✗')) {
+            cell.s = { fill: { fgColor: { rgb: '3D1A1A' } }, font: { color: { rgb: 'FCA5A5' }, bold: true } }
+          }
+        }
+      }
+
+      wsMatrix['!cols'] = [
+        { wch: 24 }, { wch: 8 }, { wch: 13 },
+        ...quiz.questions.map(() => ({ wch: 14 })),
+      ]
+      XLSX.utils.book_append_sheet(workbook, wsMatrix, 'Answer Matrix')
+
+      const safeTitle = quiz.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()
+      const date = new Date().toISOString().slice(0, 10)
+      XLSX.writeFile(workbook, `quiz-results-${safeTitle}-${date}.xlsx`)
+    } finally {
+      setIsExporting(false)
+    }
   }
 
   if (session.status === 'finished') {
@@ -223,9 +340,13 @@ export default function HostControlPanel({ initialSession, quiz, initialParticip
               id="download-results-btn"
               className="btn btn-primary"
               onClick={downloadResultsExcel}
-              style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}
+              disabled={isExporting}
+              style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', minWidth: 220 }}
             >
-              <span>📊</span> Download Results (.xlsx)
+              {isExporting
+                ? <><span className="spinner" /> Preparing export...</>
+                : <><span>📊</span> Download Results (.xlsx)</>
+              }
             </button>
             <Link href="/dashboard" className="btn btn-ghost">← Back to Dashboard</Link>
           </div>
