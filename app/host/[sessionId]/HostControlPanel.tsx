@@ -6,6 +6,7 @@ import { advanceSession, startSession, endSession, skipLeaderboardToNextQuestion
 import { QRCodeSVG } from 'qrcode.react'
 import type { Participant, Answer } from '@/lib/types'
 import Link from 'next/link'
+import * as XLSX from 'xlsx'
 
 type SessionStatus = 'waiting' | 'active' | 'question' | 'results' | 'leaderboard' | 'finished'
 
@@ -168,6 +169,39 @@ export default function HostControlPanel({ initialSession, quiz, initialParticip
     return '▶ Next'
   }
 
+  function downloadResultsExcel() {
+    const rows = sortedParticipants.map((p, i) => ({
+      Rank: i + 1,
+      Name: p.display_name,
+      Score: p.score,
+      'Questions Answered': p.answers_count,
+      'Correct Answers': p.correct_count,
+      'Accuracy (%)': p.answers_count > 0
+        ? Math.round((p.correct_count / p.answers_count) * 100)
+        : 0,
+    }))
+
+    const worksheet = XLSX.utils.json_to_sheet(rows)
+
+    // Auto column widths
+    const colWidths = [
+      { wch: 6 },  // Rank
+      { wch: 24 }, // Name
+      { wch: 10 }, // Score
+      { wch: 22 }, // Questions Answered
+      { wch: 18 }, // Correct Answers
+      { wch: 15 }, // Accuracy
+    ]
+    worksheet['!cols'] = colWidths
+
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Leaderboard')
+
+    const safeTitle = quiz.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()
+    const date = new Date().toISOString().slice(0, 10)
+    XLSX.writeFile(workbook, `quiz-results-${safeTitle}-${date}.xlsx`)
+  }
+
   if (session.status === 'finished') {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--space-6)' }}>
@@ -184,7 +218,17 @@ export default function HostControlPanel({ initialSession, quiz, initialParticip
               </div>
             ))}
           </div>
-          <Link href="/dashboard" className="btn btn-primary">← Back to Dashboard</Link>
+          <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap', justifyContent: 'center' }}>
+            <button
+              id="download-results-btn"
+              className="btn btn-primary"
+              onClick={downloadResultsExcel}
+              style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}
+            >
+              <span>📊</span> Download Results (.xlsx)
+            </button>
+            <Link href="/dashboard" className="btn btn-ghost">← Back to Dashboard</Link>
+          </div>
         </div>
       </div>
     )
