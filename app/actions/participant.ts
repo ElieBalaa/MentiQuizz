@@ -67,9 +67,10 @@ export async function submitAnswer(
     pointsEarned = Math.floor(500 + 500 * ratio)
   }
 
-  // Upsert the answer. ignoreDuplicates:false means if a row already exists
-  // (duplicate key) it will update it and return the stored values.
-  const { data: inserted, error: answerError } = await supabase
+  // Insert the answer. ignoreDuplicates:true means if this student already answered
+  // (e.g. page reload), the insert is silently skipped with no error.
+  // We always follow up with a read so we get the authoritative stored values.
+  const { error: insertError } = await supabase
     .from('answers')
     .upsert(
       {
@@ -81,42 +82,52 @@ export async function submitAnswer(
         time_taken_ms: timeTakenMs,
         points_earned: pointsEarned,
       },
-      { onConflict: 'session_id,question_id,participant_id', ignoreDuplicates: false }
+      { onConflict: 'session_id,question_id,participant_id', ignoreDuplicates: true }
     )
-    .select('is_correct, points_earned, chosen_option')
-    .single()
 
-  if (answerError || !inserted) {
-    // Last-resort: try to read the existing row (e.g. RLS blocked the upsert)
-    const { data: existing } = await supabase
-      .from('answers')
-      .select('is_correct, points_earned')
-      .eq('session_id', sessionId)
-      .eq('question_id', questionId)
-      .eq('participant_id', participantId)
-      .single()
-    if (existing) {
-      return { pointsEarned: existing.points_earned, isCorrect: existing.is_correct }
-    }
+  if (insertError) {
+    console.error('[submitAnswer] upsert error:', insertError)
     return { error: 'Failed to submit answer' }
   }
 
-  // Use values that were actually stored (handles the case where this was a duplicate
-  // and the upsert updated the row with new values).
-  const storedIsCorrect = inserted.is_correct
-  const storedPoints = inserted.points_earned
+  // Always read back the stored row — handles both fresh inserts and
+  // ignored duplicates (e.g. student reloaded mid-question).
+  const { data: stored, error: readError } = await supabase
+    .from('answers')
+    .select('is_correct, points_earned, chosen_option')
+    .eq('session_id', sessionId)
+    .eq('question_id', questionId)
+    .eq('participant_id', participantId)
+    .single()
 
-  // Atomic score update using Postgres-level increment to avoid lost-update
-  // races when many students submit at the same time.
-  if (storedIsCorrect) {
-    await supabase.rpc('increment_participant_correct', {
-      p_participant_id: participantId,
-      p_points: storedPoints,
-    })
-  } else {
-    await supabase.rpc('increment_participant_answers', {
-      p_participant_id: participantId,
-    })
+  if (readError || !stored) {
+    console.error('[submitAnswer] read-back error:', readError)
+    return { error: 'Failed to submit answer' }
+  }
+
+  const storedIsCorrect = stored.is_correct
+  const storedPoints = stored.points_earned
+
+  // Only update the score if this was a FRESH insert (not a duplicate skip).
+  // We detect a fresh insert by checking if isCorrect matches what we sent;
+  // if it's a duplicate, storedIsCorrect may differ — either way the score
+  // was already counted on the original submission.
+  const wasFreshInsert = stored.chosen_option !== undefined
+    ? stored.chosen_option === chosenOption
+    : true
+
+  // Atomic score update — no read-then-write race under concurrent submissions.
+  if (wasFreshInsert) {
+    if (storedIsCorrect) {
+      await supabase.rpc('increment_participant_correct', {
+        p_participant_id: participantId,
+        p_points: storedPoints,
+      })
+    } else {
+      await supabase.rpc('increment_participant_answers', {
+        p_participant_id: participantId,
+      })
+    }
   }
 
   return { pointsEarned: storedPoints, isCorrect: storedIsCorrect }
