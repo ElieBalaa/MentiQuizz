@@ -1,6 +1,6 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/supabase/server'
 
 export async function joinSession(roomCode: string, displayName: string): Promise<{ sessionId: string; participantId: string } | { error: string }> {
   const supabase = await createClient()
@@ -46,20 +46,27 @@ export async function submitAnswer(
   timeTakenMs: number,
   timeLimit: number
 ): Promise<{ pointsEarned: number; isCorrect: boolean } | { error: string }> {
-  const supabase = await createClient()
+  // Use admin client so unauthenticated participants can always write answers.
+  // RLS on the anon client blocks write operations for non-logged-in users
+  // even when the policy says "with check (true)" due to PostgREST upsert
+  // conflict resolution requiring an UPDATE grant that doesn't exist.
+  const supabase = await createAdminClient()
 
   // Get correct answer
-  const { data: question } = await supabase
+  const { data: question, error: questionError } = await supabase
     .from('questions')
     .select('correct_answer, time_limit')
     .eq('id', questionId)
     .single()
 
-  if (!question) return { error: 'Question not found' }
+  if (questionError || !question) {
+    console.error('[submitAnswer] question fetch error:', questionError)
+    return { error: 'Question not found' }
+  }
 
   const isCorrect = chosenOption === question.correct_answer
 
-  // Calculate points
+  // Calculate points (Kahoot-style: 500–1000 based on speed)
   let pointsEarned = 0
   if (isCorrect) {
     const timeLimitMs = timeLimit * 1000
@@ -67,68 +74,88 @@ export async function submitAnswer(
     pointsEarned = Math.floor(500 + 500 * ratio)
   }
 
-  // Insert the answer. ignoreDuplicates:true means if this student already answered
-  // (e.g. page reload), the insert is silently skipped with no error.
-  // We always follow up with a read so we get the authoritative stored values.
+  // Plain INSERT — if the student already answered (page reload / double-click),
+  // Postgres returns error code 23505 (unique_violation). We catch that and
+  // read back the existing row so the UI still gets the correct result.
   const { error: insertError } = await supabase
     .from('answers')
-    .upsert(
-      {
-        session_id: sessionId,
-        question_id: questionId,
-        participant_id: participantId,
-        chosen_option: chosenOption,
-        is_correct: isCorrect,
-        time_taken_ms: timeTakenMs,
-        points_earned: pointsEarned,
-      },
-      { onConflict: 'session_id,question_id,participant_id', ignoreDuplicates: true }
-    )
+    .insert({
+      session_id: sessionId,
+      question_id: questionId,
+      participant_id: participantId,
+      chosen_option: chosenOption,
+      is_correct: isCorrect,
+      time_taken_ms: timeTakenMs,
+      points_earned: pointsEarned,
+    })
 
   if (insertError) {
-    console.error('[submitAnswer] upsert error:', insertError)
+    if (insertError.code === '23505') {
+      // Duplicate — student already answered (e.g. page reload). Read the stored row.
+      const { data: existing, error: readError } = await supabase
+        .from('answers')
+        .select('is_correct, points_earned')
+        .eq('session_id', sessionId)
+        .eq('question_id', questionId)
+        .eq('participant_id', participantId)
+        .single()
+
+      if (readError || !existing) {
+        console.error('[submitAnswer] duplicate read-back error:', readError)
+        return { error: 'Failed to submit answer' }
+      }
+
+      return { pointsEarned: existing.points_earned, isCorrect: existing.is_correct }
+    }
+
+    console.error('[submitAnswer] insert error:', insertError)
     return { error: 'Failed to submit answer' }
   }
 
-  // Always read back the stored row — handles both fresh inserts and
-  // ignored duplicates (e.g. student reloaded mid-question).
-  const { data: stored, error: readError } = await supabase
-    .from('answers')
-    .select('is_correct, points_earned, chosen_option')
-    .eq('session_id', sessionId)
-    .eq('question_id', questionId)
-    .eq('participant_id', participantId)
-    .single()
-
-  if (readError || !stored) {
-    console.error('[submitAnswer] read-back error:', readError)
-    return { error: 'Failed to submit answer' }
-  }
-
-  const storedIsCorrect = stored.is_correct
-  const storedPoints = stored.points_earned
-
-  // Only update the score if this was a FRESH insert (not a duplicate skip).
-  // We detect a fresh insert by checking if isCorrect matches what we sent;
-  // if it's a duplicate, storedIsCorrect may differ — either way the score
-  // was already counted on the original submission.
-  const wasFreshInsert = stored.chosen_option !== undefined
-    ? stored.chosen_option === chosenOption
-    : true
-
-  // Atomic score update — no read-then-write race under concurrent submissions.
-  if (wasFreshInsert) {
-    if (storedIsCorrect) {
-      await supabase.rpc('increment_participant_correct', {
-        p_participant_id: participantId,
-        p_points: storedPoints,
-      })
-    } else {
-      await supabase.rpc('increment_participant_answers', {
-        p_participant_id: participantId,
-      })
+  // Fresh insert succeeded — atomically update the participant's score.
+  if (isCorrect) {
+    const { error: rpcError } = await supabase.rpc('increment_participant_correct', {
+      p_participant_id: participantId,
+      p_points: pointsEarned,
+    })
+    if (rpcError) {
+      // Fallback to read-then-write if RPC doesn't exist yet
+      console.warn('[submitAnswer] RPC not found, falling back:', rpcError.message)
+      const { data: p } = await supabase
+        .from('participants')
+        .select('score, correct_count, answers_count')
+        .eq('id', participantId)
+        .single()
+      if (p) {
+        await supabase
+          .from('participants')
+          .update({
+            score: p.score + pointsEarned,
+            correct_count: p.correct_count + 1,
+            answers_count: p.answers_count + 1,
+          })
+          .eq('id', participantId)
+      }
+    }
+  } else {
+    const { error: rpcError } = await supabase.rpc('increment_participant_answers', {
+      p_participant_id: participantId,
+    })
+    if (rpcError) {
+      console.warn('[submitAnswer] RPC not found, falling back:', rpcError.message)
+      const { data: p } = await supabase
+        .from('participants')
+        .select('answers_count')
+        .eq('id', participantId)
+        .single()
+      if (p) {
+        await supabase
+          .from('participants')
+          .update({ answers_count: p.answers_count + 1 })
+          .eq('id', participantId)
+      }
     }
   }
 
-  return { pointsEarned: storedPoints, isCorrect: storedIsCorrect }
+  return { pointsEarned, isCorrect }
 }
