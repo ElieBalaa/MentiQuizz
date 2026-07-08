@@ -184,3 +184,7 @@ export async function skipLeaderboardToNextQuestion(sessionId: string) {
 
   revalidatePath(`/host/${sessionId}`)
 }
+
+export async function getServerTime(): Promise<number> {
+  return Date.now()
+}

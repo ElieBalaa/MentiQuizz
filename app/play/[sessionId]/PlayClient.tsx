@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { submitAnswer } from '@/app/actions/participant'
+import { getServerTime } from '@/app/actions/session'
 import Link from 'next/link'
 
 type SessionStatus = 'waiting' | 'active' | 'question' | 'results' | 'leaderboard' | 'finished'
@@ -50,6 +51,7 @@ interface Props {
 export default function PlayClient({ sessionId, quizTitle, initialStatus }: Props) {
   const supabase = createClient()
   const [participantId, setParticipantId] = useState<string | null>(null)
+  const [serverOffset, setServerOffset] = useState<number>(0)
   const [displayName, setDisplayName] = useState('')
   const [session, setSession] = useState<Session>({
     status: initialStatus as SessionStatus,
@@ -68,6 +70,7 @@ export default function PlayClient({ sessionId, quizTitle, initialStatus }: Prop
   const [countdown, setCountdown] = useState<number>(0)
   const questionStartRef = useRef<string | null>(null)
   const submittingRef = useRef(false)
+  const timeLeftReady = useRef(false) // true once timeLeft has been set to a positive value
 
   // Load participant from sessionStorage on mount
   useEffect(() => {
@@ -75,6 +78,22 @@ export default function PlayClient({ sessionId, quizTitle, initialStatus }: Prop
     const name = sessionStorage.getItem('displayName') ?? ''
     setParticipantId(pid)
     setDisplayName(name)
+  }, [])
+
+  // Sync client time with server time
+  useEffect(() => {
+    const syncTime = async () => {
+      try {
+        const t0 = Date.now()
+        const serverTime = await getServerTime()
+        const t1 = Date.now()
+        const latency = (t1 - t0) / 2
+        setServerOffset(serverTime - (t1 - latency))
+      } catch (err) {
+        console.error('Failed to sync time with server:', err)
+      }
+    }
+    syncTime()
   }, [])
 
   // Load full session on mount
@@ -131,10 +150,12 @@ export default function PlayClient({ sessionId, quizTitle, initialStatus }: Prop
         if (data) {
           setCurrentQuestion(data as Question)
           const elapsedMs = session.question_started_at
-            ? Date.now() - new Date(session.question_started_at).getTime()
+            ? (Date.now() + serverOffset) - new Date(session.question_started_at).getTime()
             : 0
           const elapsedSeconds = Math.floor(elapsedMs / 1000)
           const remaining = Math.max(0, data.time_limit - Math.max(0, elapsedSeconds - 3))
+          // Mark timeLeft as ready so isTimeUp won't fire prematurely
+          if (remaining > 0) timeLeftReady.current = true
           setTimeLeft(remaining)
         }
       })
@@ -162,7 +183,7 @@ export default function PlayClient({ sessionId, quizTitle, initialStatus }: Prop
 
     // 3. Check if countdown should run (if less than 3 seconds have elapsed since started)
     const elapsedMs = session.question_started_at
-      ? Date.now() - new Date(session.question_started_at).getTime()
+      ? (Date.now() + serverOffset) - new Date(session.question_started_at).getTime()
       : 0
     const elapsedSeconds = elapsedMs / 1000
 
@@ -174,7 +195,9 @@ export default function PlayClient({ sessionId, quizTitle, initialStatus }: Prop
     }
 
     questionStartRef.current = session.question_started_at
-  }, [session.current_question_id, session.question_started_at, participantId, sessionId, supabase, session.status])
+    // Reset readiness flag when question changes so next question starts clean
+    timeLeftReady.current = false
+  }, [session.current_question_id, session.question_started_at, participantId, sessionId, supabase, session.status, serverOffset])
 
   // Handle countdown ticks
   useEffect(() => {
@@ -226,7 +249,7 @@ export default function PlayClient({ sessionId, quizTitle, initialStatus }: Prop
     setHasAnswered(true)
 
     const rawTimeTakenMs = session.question_started_at
-      ? Date.now() - new Date(session.question_started_at).getTime()
+      ? (Date.now() + serverOffset) - new Date(session.question_started_at).getTime()
       : currentQuestion.time_limit * 1000
     // Subtract 3s (3000ms) for the countdown, min 0
     const timeTakenMs = Math.max(0, rawTimeTakenMs - 3000)
@@ -293,7 +316,15 @@ export default function PlayClient({ sessionId, quizTitle, initialStatus }: Prop
   }
 
   // RESULTS PHASE (answer revealed) OR when time runs out on the client
-  const isTimeUp = session.status === 'results' || (session.status === 'question' && timeLeft <= 0 && countdown === 0)
+  // Only treat timeLeft===0 as "time's up" if the timer was actually initialized to a
+  // positive value first — prevents false positives when a student joins mid-question
+  // and data hasn't loaded yet (timeLeft starts at 0 by default).
+  const isTimeUp = session.status === 'results' || (
+    session.status === 'question' &&
+    timeLeft <= 0 &&
+    countdown === 0 &&
+    timeLeftReady.current
+  )
 
   if (isTimeUp && currentQuestion) {
     return (

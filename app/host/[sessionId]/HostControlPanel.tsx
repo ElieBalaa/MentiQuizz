@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useTransition } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { advanceSession, startSession, endSession, skipLeaderboardToNextQuestion } from '@/app/actions/session'
+import { advanceSession, startSession, endSession, skipLeaderboardToNextQuestion, getServerTime } from '@/app/actions/session'
 import { QRCodeSVG } from 'qrcode.react'
 import type { Participant, Answer } from '@/lib/types'
 import Link from 'next/link'
@@ -49,6 +49,7 @@ export default function HostControlPanel({ initialSession, quiz, initialParticip
   const [participants, setParticipants] = useState<Participant[]>(initialParticipants)
   const [answers, setAnswers] = useState<Answer[]>([])
   const [timeLeft, setTimeLeft] = useState<number>(0)
+  const [serverOffset, setServerOffset] = useState<number>(0)
   const [isPending, startTransition] = useTransition()
   const [isExporting, setIsExporting] = useState(false)
 
@@ -57,6 +58,22 @@ export default function HostControlPanel({ initialSession, quiz, initialParticip
     : null
 
   const totalQuestions = quiz.questions.length
+
+  // Sync client time with server time
+  useEffect(() => {
+    const syncTime = async () => {
+      try {
+        const t0 = Date.now()
+        const serverTime = await getServerTime()
+        const t1 = Date.now()
+        const latency = (t1 - t0) / 2
+        setServerOffset(serverTime - (t1 - latency))
+      } catch (err) {
+        console.error('Failed to sync time with server:', err)
+      }
+    }
+    syncTime()
+  }, [])
 
   // Real-time: session updates
   useEffect(() => {
@@ -120,7 +137,7 @@ export default function HostControlPanel({ initialSession, quiz, initialParticip
     }
     let interval: ReturnType<typeof setInterval>
     const update = () => {
-      const elapsed = (Date.now() - new Date(session.question_started_at!).getTime()) / 1000
+      const elapsed = (Date.now() + serverOffset - new Date(session.question_started_at!).getTime()) / 1000
       const remaining = Math.max(0, currentQuestion.time_limit - elapsed)
       setTimeLeft(remaining)
       if (remaining <= 0) clearInterval(interval)
@@ -128,7 +145,7 @@ export default function HostControlPanel({ initialSession, quiz, initialParticip
     update()
     interval = setInterval(update, 250)
     return () => clearInterval(interval)
-  }, [session.status, session.question_started_at, currentQuestion])
+  }, [session.status, session.question_started_at, currentQuestion, serverOffset])
 
   function handleAdvance() {
     startTransition(async () => {
