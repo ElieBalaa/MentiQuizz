@@ -369,6 +369,13 @@ export default function PlayClient({ sessionId, quizTitle, initialStatus }: Prop
                 Total score: <strong style={{ color: 'var(--color-primary-light)' }}>{totalScore.toLocaleString()}</strong>
               </p>
             </div>
+          ) : hasAnswered ? (
+            // Student clicked in time but submitAnswer is still in-flight — show spinner,
+            // not the "didn't answer" message. answerResult will populate once resolved.
+            <div className="card animate-pop" style={{ textAlign: 'center', padding: 'var(--space-5)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-3)' }}>
+              <span className="spinner" style={{ width: 32, height: 32, borderWidth: 3 }} />
+              <p style={{ color: 'var(--color-primary-light)', fontWeight: 600 }}>Submitting your answer...</p>
+            </div>
           ) : (
             <div className="card animate-pop" style={{ textAlign: 'center', padding: 'var(--space-5)' }}>
               <p style={{ color: 'var(--color-warning)', fontWeight: 600 }}>⏰ Time&apos;s up — you didn&apos;t answer in time</p>
