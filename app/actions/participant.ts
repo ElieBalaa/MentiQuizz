@@ -92,7 +92,7 @@ export async function submitAnswer(
       participant_id: participantId,
       chosen_option: chosenOption,
       is_correct: isCorrect,
-      time_taken_ms: timeTakenMs,
+      time_taken_ms: Math.round(timeTakenMs), // DB column is INTEGER — round the float
       points_earned: pointsEarned,
     })
 
