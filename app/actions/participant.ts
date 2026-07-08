@@ -46,13 +46,24 @@ export async function submitAnswer(
   timeTakenMs: number,
   timeLimit: number
 ): Promise<{ pointsEarned: number; isCorrect: boolean } | { error: string }> {
-  // Use admin client so unauthenticated participants can always write answers.
-  // RLS on the anon client blocks write operations for non-logged-in users
-  // even when the policy says "with check (true)" due to PostgREST upsert
-  // conflict resolution requiring an UPDATE grant that doesn't exist.
-  const supabase = await createAdminClient()
 
-  // Get correct answer
+  // ── STEP 1: verify env vars are present ──────────────────────────────────
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const serviceKey  = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!supabaseUrl || !serviceKey) {
+    const missing = [!supabaseUrl && 'NEXT_PUBLIC_SUPABASE_URL', !serviceKey && 'SUPABASE_SERVICE_ROLE_KEY'].filter(Boolean).join(', ')
+    return { error: `[DEBUG] Missing env vars: ${missing}` }
+  }
+
+  // ── STEP 2: build admin client ────────────────────────────────────────────
+  let supabase: Awaited<ReturnType<typeof createAdminClient>>
+  try {
+    supabase = await createAdminClient()
+  } catch (e) {
+    return { error: `[DEBUG] createAdminClient threw: ${String(e)}` }
+  }
+
+  // ── STEP 3: fetch the question ────────────────────────────────────────────
   const { data: question, error: questionError } = await supabase
     .from('questions')
     .select('correct_answer, time_limit')
@@ -60,13 +71,11 @@ export async function submitAnswer(
     .single()
 
   if (questionError || !question) {
-    console.error('[submitAnswer] question fetch error:', questionError)
-    return { error: 'Question not found' }
+    return { error: `[DEBUG] Question fetch failed — code:${questionError?.code} msg:${questionError?.message} hint:${questionError?.hint}` }
   }
 
   const isCorrect = chosenOption === question.correct_answer
 
-  // Calculate points (Kahoot-style: 500–1000 based on speed)
   let pointsEarned = 0
   if (isCorrect) {
     const timeLimitMs = timeLimit * 1000
@@ -74,9 +83,7 @@ export async function submitAnswer(
     pointsEarned = Math.floor(500 + 500 * ratio)
   }
 
-  // Plain INSERT — if the student already answered (page reload / double-click),
-  // Postgres returns error code 23505 (unique_violation). We catch that and
-  // read back the existing row so the UI still gets the correct result.
+  // ── STEP 4: insert the answer ─────────────────────────────────────────────
   const { error: insertError } = await supabase
     .from('answers')
     .insert({
@@ -91,7 +98,7 @@ export async function submitAnswer(
 
   if (insertError) {
     if (insertError.code === '23505') {
-      // Duplicate — student already answered (e.g. page reload). Read the stored row.
+      // Duplicate — student already answered. Read the stored row.
       const { data: existing, error: readError } = await supabase
         .from('answers')
         .select('is_correct, points_earned')
@@ -101,26 +108,21 @@ export async function submitAnswer(
         .single()
 
       if (readError || !existing) {
-        console.error('[submitAnswer] duplicate read-back error:', readError)
-        return { error: 'Failed to submit answer' }
+        return { error: `[DEBUG] Duplicate read-back failed — code:${readError?.code} msg:${readError?.message}` }
       }
-
       return { pointsEarned: existing.points_earned, isCorrect: existing.is_correct }
     }
-
-    console.error('[submitAnswer] insert error:', insertError)
-    return { error: 'Failed to submit answer' }
+    return { error: `[DEBUG] INSERT failed — code:${insertError.code} msg:${insertError.message} hint:${insertError.hint} details:${insertError.details}` }
   }
 
-  // Fresh insert succeeded — atomically update the participant's score.
+  // ── STEP 5: update participant score ──────────────────────────────────────
   if (isCorrect) {
     const { error: rpcError } = await supabase.rpc('increment_participant_correct', {
       p_participant_id: participantId,
       p_points: pointsEarned,
     })
     if (rpcError) {
-      // Fallback to read-then-write if RPC doesn't exist yet
-      console.warn('[submitAnswer] RPC not found, falling back:', rpcError.message)
+      // RPC not created yet — fall back to read-then-write
       const { data: p } = await supabase
         .from('participants')
         .select('score, correct_count, answers_count')
@@ -142,7 +144,6 @@ export async function submitAnswer(
       p_participant_id: participantId,
     })
     if (rpcError) {
-      console.warn('[submitAnswer] RPC not found, falling back:', rpcError.message)
       const { data: p } = await supabase
         .from('participants')
         .select('answers_count')
