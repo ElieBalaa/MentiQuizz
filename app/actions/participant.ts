@@ -67,54 +67,57 @@ export async function submitAnswer(
     pointsEarned = Math.floor(500 + 500 * ratio)
   }
 
-  // Insert answer (ignore duplicate if already answered)
-  const { error: answerError } = await supabase
+  // Upsert the answer. ignoreDuplicates:false means if a row already exists
+  // (duplicate key) it will update it and return the stored values.
+  const { data: inserted, error: answerError } = await supabase
     .from('answers')
-    .upsert({
-      session_id: sessionId,
-      question_id: questionId,
-      participant_id: participantId,
-      chosen_option: chosenOption,
-      is_correct: isCorrect,
-      time_taken_ms: timeTakenMs,
-      points_earned: pointsEarned,
-    }, { onConflict: 'session_id,question_id,participant_id', ignoreDuplicates: true })
+    .upsert(
+      {
+        session_id: sessionId,
+        question_id: questionId,
+        participant_id: participantId,
+        chosen_option: chosenOption,
+        is_correct: isCorrect,
+        time_taken_ms: timeTakenMs,
+        points_earned: pointsEarned,
+      },
+      { onConflict: 'session_id,question_id,participant_id', ignoreDuplicates: false }
+    )
+    .select('is_correct, points_earned, chosen_option')
+    .single()
 
-  if (answerError) return { error: 'Failed to submit answer' }
-
-  // Update participant score
-  if (isCorrect) {
-    // Fetch current score and update manually
-    const { data: pData } = await supabase
-      .from('participants')
-      .select('score, correct_count, answers_count')
-      .eq('id', participantId)
+  if (answerError || !inserted) {
+    // Last-resort: try to read the existing row (e.g. RLS blocked the upsert)
+    const { data: existing } = await supabase
+      .from('answers')
+      .select('is_correct, points_earned')
+      .eq('session_id', sessionId)
+      .eq('question_id', questionId)
+      .eq('participant_id', participantId)
       .single()
-
-    if (pData) {
-      await supabase
-        .from('participants')
-        .update({
-          score: pData.score + pointsEarned,
-          correct_count: pData.correct_count + 1,
-          answers_count: pData.answers_count + 1,
-        })
-        .eq('id', participantId)
+    if (existing) {
+      return { pointsEarned: existing.points_earned, isCorrect: existing.is_correct }
     }
-  } else {
-    // Update answer count only
-    const { data: p } = await supabase
-      .from('participants')
-      .select('answers_count')
-      .eq('id', participantId)
-      .single()
-    if (p) {
-      await supabase
-        .from('participants')
-        .update({ answers_count: p.answers_count + 1 })
-        .eq('id', participantId)
-    }
+    return { error: 'Failed to submit answer' }
   }
 
-  return { pointsEarned, isCorrect }
+  // Use values that were actually stored (handles the case where this was a duplicate
+  // and the upsert updated the row with new values).
+  const storedIsCorrect = inserted.is_correct
+  const storedPoints = inserted.points_earned
+
+  // Atomic score update using Postgres-level increment to avoid lost-update
+  // races when many students submit at the same time.
+  if (storedIsCorrect) {
+    await supabase.rpc('increment_participant_correct', {
+      p_participant_id: participantId,
+      p_points: storedPoints,
+    })
+  } else {
+    await supabase.rpc('increment_participant_answers', {
+      p_participant_id: participantId,
+    })
+  }
+
+  return { pointsEarned: storedPoints, isCorrect: storedIsCorrect }
 }
